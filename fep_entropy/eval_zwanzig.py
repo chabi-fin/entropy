@@ -7,8 +7,10 @@ def main(argv):
 
     try:
         temperature = int(argv[1])
+        system = argv[2]
     except IndexError:
         temperature = 298
+        system = "ETG-E1G"
 
     # Variables for describing systems and file names
     coupling_parameters = ["000", "010", "020", "030", "040", "050", "060", \
@@ -33,41 +35,55 @@ def main(argv):
                 ref_state = directions[d][alch_change]
                 target_state = directions[d][alch_change + 1]
                 ref_file = "{0}/{1}_in_{1}.xvg".format(d, ref_state)
-                target_file = "{0}/{1}_in_{2}.xvg".format(d, target_state, ref_state)
+                target_file = "{0}/{1}_in_{2}.xvg".format(d, target_state, \
+                                                                    ref_state)
                 ref_traj = np.loadtxt(ref_file, comments=["#", "@"])
                 target_traj = np.loadtxt(target_file, comments=["#", "@"])
 
-                del_F = free_energy_diff(ref_traj[:,1], target_traj[:,1], d, temperature)
+                del_F = free_energy_diff(ref_traj[:,1], target_traj[:,1], d, \
+                                                                temperature)
                 if d == "forward":
                     key = "{0}->{1}".format(ref_state, target_state)
                     delta_Us[key] = target_traj[:,1] - ref_traj[:,1]
                 else:
                     key = "{0}<-{1}".format(target_state, ref_state)
                     delta_Us[key] = ref_traj[:,1] - target_traj[:,1]
-                print("State A: {}, State B: {}, deltaF : {}".format(ref_state, \
+                print("State A: {}, State B: {}, deltaF : {}".format(ref_state,\
                             target_state, del_F))
                 delta_F[key] = del_F
 
         np.save("delta_Us.npy", delta_Us)
         np.save("delta_F.npy", delta_F)
 
-    plot_energy_dist(delta_Us)
-    total_f, total_r = 0, 0
-    print("\n~~~~~ Results in the forward direction ~~~~~")
-    for k, i in delta_F.items():
-        if "->" in k:
-            total_f += i
-            print("{} : {} kJ / mol".format(k, np.round(i,1)))
-    print("Total foward: {} kJ / mol".format(np.round(total_f,1)))
-    print("~~~~~ Results in the reverse direction ~~~~~")
-    for k, i in sorted(delta_F.items()):
-        if "<-" in k:
-            total_r += i
-            print("{} : {} kJ / mol".format(k, np.round(i,1)))
-    print("Total reverse: {} kJ / mol".format(np.round(total_r,1)))
+    #plot_energy_dist(delta_Us, temperature)
 
-    #check_GB_ineq(delta_Us)
-    #plot_dF_lambda(delta_F)
+    out_file = "{}_{}K.out".format(system, temperature)
+    if os.path.exists(out_file):
+        os.remove(out_file)
+
+    total_f, total_r = 0, 0
+    with open(out_file, "a") as f:
+        f.write("\n~~~~~ Results in the forward direction ~~~~~\n")
+        for k, i in delta_F.items():
+            if "->" in k:
+                total_f += i
+                f.write("{} : {} kJ / mol\n".format(k, np.round(i,1)))
+        f.write("Total forward: {} kJ / mol\n".format(np.round(total_f,1)))
+        f.write("~~~~~ Results in the reverse direction ~~~~~\n")
+        for k, i in sorted(delta_F.items()):
+            if "<-" in k:
+                total_r += i
+                f.write("{} : {} kJ / mol\n".format(k, np.round(i,1)))
+        f.write("Total reverse: {} kJ / mol\n".format(np.round(total_r,1)))
+
+        ineq_lines = check_GB_ineq(delta_Us)
+        for line in ineq_lines:
+            f.write(line)
+
+    for k,i in delta_F.items():
+        print(k, ":", i)
+
+    plot_dF_lambda(delta_F, system)
     #plot_prob_boltz()
 
 def free_energy_diff(ref_energy, target_energy, direction, temperature):
@@ -122,6 +138,7 @@ def check_GB_ineq(delta_Us):
     None
 
     """
+    ineq_lines = []
     forward_keys = []
     reverse_keys = []
     for key in delta_Us.keys():
@@ -132,16 +149,16 @@ def check_GB_ineq(delta_Us):
     forward_keys.sort()
     reverse_keys.sort()
 
-    print("\nThe Gibbs-Bogoliubov inequalities:")
+    ineq_lines.append("\nThe Gibbs-Bogoliubov inequalities:\n")
     for f, r in zip(forward_keys, reverse_keys):
         ave_f = np.round(np.mean(delta_Us[f]), 1)
         ave_r = np.round(np.mean(delta_Us[r]), 1)
-        print("For {}, free enegy is bounded as,\n\t{} < Delta A < {}"\
+        ineq_lines.append("For {}, free enegy is bounded as,\n\t{} < Delta A < {}\n"\
             .format(f, ave_r, ave_f))
 
-    return None
+    return ineq_lines
 
-def plot_energy_dist(delta_Us):
+def plot_energy_dist(delta_Us, temperature):
     """Make a plot of the energy distributions.
 
     Parameters
@@ -180,7 +197,8 @@ def plot_energy_dist(delta_Us):
     ax.set_xlabel(r"$\Delta U$", labelpad=5)
     plt.xlim((-10,10))
     ax.legend()
-    plt.savefig("{}_distributions.png".format("ETG-E1G"))
+    plt.show()
+    plt.savefig("{}_{}_distributions.png".format("ETG-E1G", temperature))
 
     return None
 
@@ -214,7 +232,7 @@ def plot_prob_boltz():
 
     return None
 
-def plot_dF_lambda(delta_F):
+def plot_dF_lambda(delta_F, system):
     """Plot the free energy as a function of lambda.
 
     Parameters
@@ -239,10 +257,10 @@ def plot_dF_lambda(delta_F):
             forward.append(n)
         else:
             n = float(key[:3]) / 100
-            reverse_dF.append(- delta_F[key])
+            reverse_dF.append(delta_F[key])
             revs.append(n)
-    forward_dF.sort()
-    reverse_dF.sort()
+    #forward_dF.sort()
+    #reverse_dF.sort()
 
     fig, ax = plt.subplots()
     ax.scatter(forward, forward_dF, label="forward")
@@ -259,7 +277,8 @@ def plot_dF_lambda(delta_F):
     ax.set_xlabel(r"$\lambda$", labelpad=5, fontsize=28)
     ax.set_ylabel(r"$\Delta A$", labelpad=5, fontsize=28)
     ax.legend()
-    plt.savefig("{}_dF_of_lambda.png".format("ETG-E1G"))
+    plt.show()
+    plt.savefig("{}_lambda_plot.png".format(system))
 
     return None
 
